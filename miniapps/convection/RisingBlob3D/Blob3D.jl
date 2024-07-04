@@ -1,22 +1,38 @@
+# const isCUDA = false
+const isCUDA = true
+
+@static if isCUDA 
+    using CUDA
+end
+
 using JustRelax, JustRelax.JustRelax3D, JustRelax.DataIO
 import JustRelax.@cell
-const backend_JR = CPUBackend
+
+const backend_JR = @static if isCUDA 
+    CUDABackend # Options: CPUBackend, CUDABackend, AMDGPUBackend
+else
+    JustRelax.CPUBackend # Options: CPUBackend, CUDABackend, AMDGPUBackend
+end
 
 using ParallelStencil, ParallelStencil.FiniteDifferences3D
-@init_parallel_stencil(Threads, Float64, 3) #or (CUDA, Float64, 2) or (AMDGPU, Float64, 2)
 
-using JustPIC
-using JustPIC._3D
+@static if isCUDA 
+    @init_parallel_stencil(CUDA, Float64, 3)
+else
+    @init_parallel_stencil(Threads, Float64, 3)
+end
+
+using JustPIC, JustPIC._3D
 # Threads is the default backend,
 # to run on a CUDA GPU load CUDA.jl (i.e. "using CUDA") at the beginning of the script,
 # and to run on an AMD GPU load AMDGPU.jl (i.e. "using AMDGPU") at the beginning of the script.
-const backend = CPUBackend # Options: CPUBackend, CUDABackend, AMDGPUBackend
+const backend = @static if isCUDA 
+    CUDABackend # Options: CPUBackend, CUDABackend, AMDGPUBackend
+else
+    JustPIC.CPUBackend # Options: CPUBackend, CUDABackend, AMDGPUBackend
+end
 
-using Printf, Statistics, LinearAlgebra, GeoParams, GLMakie, CellArrays
-using StaticArrays
-using ImplicitGlobalGrid
-using MPI: MPI
-using WriteVTK
+using GeoParams, GLMakie, CellArrays
 
 ## SET OF HELPER FUNCTIONS PARTICULAR FOR THIS SCRIPT --------------------------------
 
@@ -101,7 +117,6 @@ function circular_perturbation!(T, δT, xc_anomaly, yc_anomaly, zc_anomaly, r_an
     )
         depth = -z[k] - sticky_air
         @inbounds if ((x[i] - xc_anomaly)^2 + (y[j] - yc_anomaly)^2 + (depth + zc_anomaly)^2 ≤ r_anomaly^2)
-            # T[i, j, k] *= δT / 100 + 1
             T[i, j, k] = δT
         end
         return nothing
@@ -137,17 +152,11 @@ function init_rheology(CharDim; is_compressible = false, steady_state=true)
         β_rock   = inv(get_Kb(el))
         β_magma  = inv(get_Kb(el_magma))
     end
-    if steady_state == true
-        creep_rock  = LinearViscous(; η=1e23 * Pa * s)
-        creep_magma = LinearViscous(; η=1e18 * Pa * s)
-        creep_air   = LinearViscous(; η=1e18 * Pa * s)
-    else
-        creep_rock  = DislocationCreep(; A=1.67e-24, n=3.5, E=1.87e5, V=6e-6, r=0.0, R=8.3145)
-        creep_magma = DislocationCreep(; A=1.67e-24, n=3.5, E=1.87e5, V=6e-6, r=0.0, R=8.3145)
-        creep_air   = LinearViscous(; η=1e18 * Pa * s)
-        β_rock      = 6.0e-11
-        β_magma     = 6.0e-11
-    end
+    creep_rock  = LinearViscous(; η=1e18 * Pa * s)
+    creep_magma = LinearViscous(; η=1e18 * Pa * s)
+    creep_air   = LinearViscous(; η=1e18 * Pa * s)
+    β_rock      = 6.0e-11
+    β_magma     = 6.0e-11
     g = 9.81m/s^2
     rheology = (
         #Name="UpperCrust"
@@ -159,7 +168,7 @@ function init_rheology(CharDim; is_compressible = false, steady_state=true)
             LatentHeat        = ConstantLatentHeat(; Q_L=350e3J / kg),
             ShearHeat         = ConstantShearheating(1.0NoUnits),
             CompositeRheology = CompositeRheology((creep_rock, el, pl)),
-            Melting           = MeltingParam_Caricchi(),
+            # Melting           = MeltingParam_Caricchi(),
             Gravity           = ConstantGravity(; g=g),
             Elasticity        = el,
             CharDim           = CharDim,
@@ -174,7 +183,7 @@ function init_rheology(CharDim; is_compressible = false, steady_state=true)
             LatentHeat        = ConstantLatentHeat(; Q_L=350e3J / kg),
             ShearHeat         = ConstantShearheating(0.0NoUnits),
             CompositeRheology = CompositeRheology((creep_magma, el_magma)),
-            Melting           = MeltingParam_Caricchi(),
+            # Melting           = MeltingParam_Caricchi(),
             Gravity           = ConstantGravity(; g=g),
             Elasticity        = el_magma,
             CharDim           = CharDim,
@@ -204,7 +213,7 @@ function main3D(igg; figdir = "output", nx = 64, ny = 64, nz = 64, do_vtk = fals
 
     #-------JustRelax parameters-------------------------------------------------------------
     # Domain setup for JustRelax
-    sticky_air   = nondimensionalize(1.5km, CharDim)          # thickness of the sticky air layer
+    sticky_air   = nondimensionalize(0km, CharDim)          # thickness of the sticky air layer
     lz           = nondimensionalize(12.5km,CharDim) + sticky_air     # domain length in y-direction
     lx      = ly = nondimensionalize(15.5km, CharDim)            # domain length in x-direction
     li           = lx, ly, lz                                         # domain length in x- and y-direction
@@ -226,7 +235,8 @@ function main3D(igg; figdir = "output", nx = 64, ny = 64, nz = 64, do_vtk = fals
     nxcell           = 20
     max_xcell        = 40
     min_xcell        = 15
-    particles        = init_particles(backend, nxcell, max_xcell, min_xcell, xvi...)
+    particles        = init_particles(backend, nxcell, max_xcell, min_xcell, xvi, di, ni);
+
     subgrid_arrays   = SubgridDiffusionCellArrays(particles)
     # velocity grids
     grid_vxi         = velocity_grids(xci, xvi, di)
@@ -237,7 +247,8 @@ function main3D(igg; figdir = "output", nx = 64, ny = 64, nz = 64, do_vtk = fals
     # Circular temperature anomaly--------------------------
     x_anomaly    = lx * 0.5
     y_anomaly    = ly * 0.5
-    z_anomaly    = nondimensionalize(-5km,CharDim)  # origin of the small thermal anomaly
+    z_anomaly    = -lz * 0.5
+    # z_anomaly    = nondimensionalize(-5km,CharDim)  # origin of the small thermal anomaly
     r_anomaly    = nondimensionalize(1.5km, CharDim)             # radius of perturbation
     anomaly      = nondimensionalize((750 + 273)K, CharDim)               # thermal perturbation (in K)
     phase_ratios = PhaseRatio(backend_JR, ni, length(rheology))
@@ -282,7 +293,6 @@ function main3D(igg; figdir = "output", nx = 64, ny = 64, nz = 64, do_vtk = fals
     )
     flow_bcs!(stokes, flow_bcs)
     update_halo!(@velocity(stokes)...)
-
 
     # Buoyancy force & viscosity
     ρg = @zeros(ni...), @zeros(ni...), @zeros(ni...) # ρg[1] is the buoyancy force in the x direction, ρg[2] is the buoyancy force in the y direction
@@ -340,13 +350,12 @@ function main3D(igg; figdir = "output", nx = 64, ny = 64, nz = 64, do_vtk = fals
 
     @copy stokes.P0 stokes.P
     @copy thermal.Told thermal.T
-    Tsurf  = thermal.T[1, 1, end]
-    Tbot   = thermal.T[1, 1, 1]
+    Tsurf, Tbot  = extrema(thermal.T)
 
     while it < 25
 
         # Update buoyancy and viscosity -
-        args = (; T=thermal.Tc, P=stokes.P, dt=Inf, ΔTc=thermal.ΔTc)
+        args = (; T=thermal.Tc, P=stokes.P, dt=Inf)
         compute_ρg!(ρg[end], phase_ratios, rheology, (T=thermal.Tc, P=stokes.P))
         compute_viscosity!(stokes, phase_ratios, args, rheology, cutoff_visc)
 
@@ -370,17 +379,8 @@ function main3D(igg; figdir = "output", nx = 64, ny = 64, nz = 64, do_vtk = fals
             )
         )
         tensor_invariant!(stokes.ε)
-
-        dt = compute_dt(stokes, di, dt_diff, igg)
+        dt = compute_dt(stokes, di, dt_diff, igg) * 0.8
         # --------------------------------
-
-        compute_shear_heating!(
-            thermal,
-            stokes,
-            phase_ratios,
-            rheology, # needs to be a tuple
-            dt,
-        )
 
         # Thermal solver ---------------
         heatdiffusion_PT!(
@@ -420,20 +420,20 @@ function main3D(igg; figdir = "output", nx = 64, ny = 64, nz = 64, do_vtk = fals
         phase_ratios_center!(phase_ratios, particles, grid, pPhases)
 
         particle2grid!(thermal.T, pT, xvi, particles)
-        @views thermal.T[:, :, end] .= Tsurf
-        @views thermal.T[:, :, 1] .= Tbot
+        # @views thermal.T[:, :, end] .= Tsurf
+        # @views thermal.T[:, :, 1] .= Tbot
         thermal_bcs!(thermal, thermal_bc)
         temperature2center!(thermal)
-        thermal.ΔT .= thermal.T .- thermal.Told
-        vertex2center!(thermal.ΔTc, thermal.ΔT)
+        # thermal.ΔT .= thermal.T .- thermal.Told
+        # vertex2center!(thermal.ΔTc, thermal.ΔT)
 
         @show it += 1
         t += dt
 
         #  # # Plotting -------------------------------------------------------
-        if it == 1 || rem(it, 1) == 0
+        if it == 1 || rem(it, 5) == 0
             (; η) = stokes.viscosity
-            checkpointing_hdf5(figdir, stokes, thermal.T, t, dt)
+            # checkpointing(figdir, stokes, thermal.T, η, t)
 
             if igg.me == 0
                 if do_vtk
@@ -442,9 +442,6 @@ function main3D(igg; figdir = "output", nx = 64, ny = 64, nz = 64, do_vtk = fals
                         T  = Array(ustrip.(dimensionalize(thermal.T, C, CharDim))),
                         τxy= Array(ustrip.(dimensionalize(stokes.τ.xy, s^-1, CharDim))),
                         εxy= Array(ustrip.(dimensionalize(stokes.ε.xy, s^-1, CharDim))),
-                        Vx = Array(ustrip.(dimensionalize(Vx_v,cm/yr,CharDim))),
-                        Vy = Array(ustrip.(dimensionalize(Vy_v, cm/yr, CharDim))),
-                        Vz = Array(ustrip.(dimensionalize(Vz_v, cm/yr, CharDim))),
                     )
                     data_c = (;
                         P   = Array(ustrip.(dimensionalize(stokes.P,MPa,CharDim))),
@@ -456,7 +453,7 @@ function main3D(igg; figdir = "output", nx = 64, ny = 64, nz = 64, do_vtk = fals
                         εyy = Array(ustrip.(dimensionalize(stokes.ε.yy, s^-1,CharDim))),
                         εzz = Array(ustrip.(dimensionalize(stokes.ε.zz, s^-1,CharDim))),
                         εII = Array(ustrip.(dimensionalize(stokes.ε.II, s^-1,CharDim))),
-                        η   = Array(ustrip.(dimensionalize(stokes.viscosity.η_vep,Pa*s,CharDim))),
+                        η   = Array(ustrip.(dimensionalize(stokes.viscosity.η,Pa*s,CharDim))),
                     )
                     velocity_v = (
                         Array(ustrip.(dimensionalize(Vx_v,cm/yr,CharDim))),
@@ -477,13 +474,15 @@ function main3D(igg; figdir = "output", nx = 64, ny = 64, nz = 64, do_vtk = fals
                     Zv  = [z for _ in 1:nx+1, _ in 1:ny+1, z in ustrip.(dimensionalize(xvi[3],km,CharDim))][:]
                     Z   = [z for _ in 1:nx  , _ in 1:ny  , z in ustrip.(dimensionalize(xci[3],km,CharDim))][:]
                     fig = Figure(; size=(1200, 900))
-                    ax1 = Axis(fig[1, 1]; aspect = 2 / 3, title="T")
-                    ax2 = Axis(fig[1, 2]; aspect = 2 / 3, title="Pressure")
-                    a3  = Axis(fig[2, 1]; aspect = 2 / 3, title="τII")
-
-                    scatter!(ax1, ustrip.(dimensionalize((Array(thermal.T)), C, CharDim))[:]  , Zv, markersize = 4)
-                    scatter!(ax2, ustrip.(dimensionalize((Array(stokes.P)), MPa, CharDim))[:] , Z , markersize = 4)
-                    scatter!(a3,  ustrip.(dimensionalize(Array(stokes.τ.II), MPa, CharDim))[:], Z , markersize = 4)
+                    ax1 = Axis(fig[1, 1]; aspect = 1, title="T")
+                    ax2 = Axis(fig[1, 2]; aspect = 1, title="Pressure")
+                    ax3 = Axis(fig[2, 1]; aspect = 1, title="τII")
+                    ax4 = Axis(fig[2, 2]; aspect = 1, title="Vz")
+                    ns  = ny >>> 1
+                    heatmap!(ax1, ustrip.(dimensionalize((Array(thermal.T)), C, CharDim))[:,ns,:]  )
+                    heatmap!(ax2, ustrip.(dimensionalize((Array(stokes.P)), MPa, CharDim))[:,ns,:] )
+                    heatmap!(ax3,  ustrip.(dimensionalize(Array(stokes.τ.II), MPa, CharDim))[:,ns,:])
+                    heatmap!(ax4,  ustrip.(dimensionalize(Array(stokes.V.Vz), m/s, CharDim))[:,ns,:])
 
                     hideydecorations!(ax2)
                     save(joinpath(figdir, "pressure_profile_$it.png"), fig)
@@ -493,11 +492,11 @@ function main3D(igg; figdir = "output", nx = 64, ny = 64, nz = 64, do_vtk = fals
         end
     end
 
-    finalize_global_grid()
+    # finalize_global_grid()
     return nothing
 end
 
-figdir = "Thermal_stresses_around_cooling_magma_3D"
+figdir = "Blob3D"
 do_vtk = true # set to true to generate VTK files for ParaView
 n      = 64
 nx     = n

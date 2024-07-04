@@ -106,7 +106,8 @@ function main(igg; nx=64, ny=64, nz=64, figdir="model_figs")
     stokes.V.Vy .= PTArray([ y*εbg/2 for _ in 1:nx+2, y in xvi[2], _ in 1:nz+2])
     stokes.V.Vz .= PTArray([-z*εbg   for _ in 1:nx+2, _ in 1:nx+2, z in xvi[3]])
     flow_bcs!(stokes, flow_bcs) # apply boundary conditions
-    update_halo!(stokes.V.Vx, stokes.V.Vy, stokes.V.Vz)
+    update_halo!(@velocity(stokes)...)
+    
     # IO ------------------------------------------------
     # if it does not exist, make folder where figures are stored
     !isdir(figdir) && mkpath(figdir)
@@ -139,8 +140,7 @@ function main(igg; nx=64, ny=64, nz=64, figdir="model_figs")
             )
         )
 
-
-        tensor_invariant!(stokes.ε.II, @strain(stokes)...)
+        tensor_invariant!(stokes.ε)
         push!(τII, maximum(stokes.τ.xx))
 
         it += 1
@@ -151,19 +151,31 @@ function main(igg; nx=64, ny=64, nz=64, figdir="model_figs")
 
         println("it = $it; t = $t \n")
 
-        data_v = (;)
-        data_c = (;
+        velocity2vertex!(Vx_v, Vy_v, Vz_v, @velocity(stokes)...)
+        data_v = (;
+            T   = Array(T_buffer),
             τII = Array(stokes.τ.II),
             εII = Array(stokes.ε.II),
-            logεII = Array(log10.(stokes.ε.II)),
-            η   = Array(η_vep),
+            Vx  = Array(Vx_v),
+            Vy  = Array(Vy_v),
+            Vz  = Array(Vz_v),
         )
-        do_vtk(
-            joinpath(figdir, "vtk_" * lpad("$it", 6, "0")),
+        data_c = (;
+            P   = Array(stokes.P),
+            η   = Array(stokes.viscosity.η_vep),
+        )
+        velocity_v = (
+            Array(Vx_v),
+            Array(Vy_v),
+            Array(Vz_v),
+        )
+        save_vtk(
+            joinpath(vtk_dir, "vtk_" * lpad("$it", 6, "0")),
             xvi,
             xci,
             data_v,
-            data_c
+            data_c,
+            velocity_v
         )
 
         # visualisation

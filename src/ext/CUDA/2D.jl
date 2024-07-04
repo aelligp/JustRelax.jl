@@ -33,6 +33,14 @@ function JR2D.StokesArrays(::Type{CUDABackend}, ni::NTuple{N,Integer}) where {N}
     return StokesArrays(ni)
 end
 
+function JR2D.velocity2displacement!(stokes::JustRelax.StokesArrays, ::CUDABackendTrait, dt)
+    return _velocity2displacement!(stokes, dt)
+end
+
+function JR2D.displacement2velocity!(stokes::JustRelax.StokesArrays, ::CUDABackendTrait, dt)
+    return _displacement2velocity!(stokes, dt)
+end
+
 function JR2D.ThermalArrays(::Type{CUDABackend}, ni::NTuple{N,Number}) where {N}
     return ThermalArrays(ni...)
 end
@@ -109,6 +117,7 @@ function JR2D.phase_ratios_center!(
 end
 
 # Rheology
+
 ## viscosity
 function JR2D.compute_viscosity!(::CUDABackendTrait, stokes, ν, args, rheology, cutoff)
     return _compute_viscosity!(stokes, ν, args, rheology, cutoff)
@@ -147,6 +156,7 @@ end
 function JR2D.compute_ρg!(ρg::CuArray, rheology, args)
     return compute_ρg!(ρg, rheology, args)
 end
+
 function JR2D.compute_ρg!(ρg::CuArray, phase_ratios::JustRelax.PhaseRatio, rheology, args)
     return compute_ρg!(ρg, phase_ratios, rheology, args)
 end
@@ -172,6 +182,13 @@ function JR2D.center2vertex!(
     vertex_yz::T, vertex_xz::T, vertex_xy::T, center_yz::T, center_xz::T, center_xy::T
 ) where {T<:CuArray}
     return center2vertex!(vertex_yz, vertex_xz, vertex_xy, center_yz, center_xz, center_xy)
+end
+
+function JR2D.velocity2vertex!(
+    Vx_v::CuArray, Vy_v::CuArray, Vx::CuArray, Vy::CuArray; ghost_nodes=true
+)
+    velocity2vertex!(Vx_v, Vy_v, Vx, Vy; ghost_nodes=ghost_nodes)
+    return nothing
 end
 
 # Solvers
@@ -222,6 +239,37 @@ function JR2D.subgrid_characteristic_time!(
     ni = size(stokes.P)
     @parallel (@idx ni) subgrid_characteristic_time!(
         dt₀, phases, rheology, thermal.Tc, stokes.P, di
+    )
+    return nothing
+end
+
+# shear heating
+
+function JR2D.compute_shear_heating!(::CUDABackendTrait, thermal, stokes, rheology, dt)
+    ni = size(thermal.shear_heating)
+    @parallel (ni) compute_shear_heating_kernel!(
+        thermal.shear_heating,
+        @tensor_center(stokes.τ),
+        @tensor_center(stokes.τ_o),
+        @strain(stokes),
+        rheology,
+        dt,
+    )
+    return nothing
+end
+
+function JR2D.compute_shear_heating!(
+    ::CUDABackendTrait, thermal, stokes, phase_ratios::JustRelax.PhaseRatio, rheology, dt
+)
+    ni = size(thermal.shear_heating)
+    @parallel (@idx ni) compute_shear_heating_kernel!(
+        thermal.shear_heating,
+        @tensor_center(stokes.τ),
+        @tensor_center(stokes.τ_o),
+        @strain(stokes),
+        phase_ratios.center,
+        rheology,
+        dt,
     )
     return nothing
 end
