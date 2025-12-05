@@ -45,9 +45,9 @@ function _solve_VS!(
     (; η, η_vep) = stokes.viscosity
     ni = size(stokes.P)
 
-    nRx = √((nx_g() - 2) * (ny_g() - 1))
-    nRy = √((nx_g() - 1) * (ny_g() - 2))
-    nRP = √(nx_g() * ny_g())
+    nRx = length(stokes.R.Rx)
+    nRy = length(stokes.R.Ry)
+    nRP = length(@views stokes.R.RP[ϕ.center .> 0])
 
     # ~preconditioner
     ητ = deepcopy(η)
@@ -135,7 +135,7 @@ function _solve_VS!(
                 )
             end
 
-            update_viscosity_τII!(
+            update_viscosity_εII!(
                 stokes,
                 phase_ratios,
                 args,

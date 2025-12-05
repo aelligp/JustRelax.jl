@@ -437,10 +437,10 @@ function _solve!(
 
             errs = (
                 norm_mpi(@views stokes.R.Rx[2:(end - 1), 2:(end - 1)]) /
-                    √((nx_g() - 2) * (ny_g() - 1)),
+                    length(stokes.R.Rx),
                 norm_mpi(@views stokes.R.Ry[2:(end - 1), 2:(end - 1)]) /
-                    √((nx_g() - 1) * (ny_g() - 2)),
-                norm_mpi(stokes.R.RP) / √(nx_g() * ny_g()),
+                    length(stokes.R.Ry),
+                norm_mpi(stokes.R.RP) / length(stokes.R.RP),
             )
 
             push!(norm_Rx, errs[1])
@@ -617,7 +617,7 @@ function _solve!(
                 )
             end
 
-            update_viscosity_τII!(
+            update_viscosity_εII!(
                 stokes,
                 phase_ratios,
                 args,
@@ -718,10 +718,10 @@ function _solve!(
 
             errs = (
                 norm_mpi(@views stokes.R.Rx[2:(end - 1), 2:(end - 1)]) /
-                    √((nx_g() - 2) * (ny_g() - 1)),
+                    length(stokes.R.Rx),
                 norm_mpi(@views stokes.R.Ry[2:(end - 1), 2:(end - 1)]) /
-                    √((nx_g() - 1) * (ny_g() - 2)),
-                norm_mpi(stokes.R.RP) / √(nx_g() * ny_g()),
+                    length(stokes.R.Ry),
+                norm_mpi(stokes.R.RP) / length(stokes.R.RP),
             )
 
             push!(norm_Rx, errs[1])
