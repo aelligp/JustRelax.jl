@@ -1,5 +1,5 @@
-const isCUDA = false
-# const isCUDA = true
+# const isCUDA = false
+const isCUDA = true
 using CairoMakie
 
 @static if isCUDA
@@ -732,8 +732,8 @@ function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir
         # args = (; ϕ = ϕ_m, T = thermal.Tc, P = stokes.P, dt = Inf, perturbation_C = perturbation_C, ΔTc=thermal.ΔTc,  Temp_bg = Temp_bg)
         eruption == true ? args = (; ϕ = ϕ_m, T = thermal.Tc, P = stokes.P, dt = dt, perturbation_C = perturbation_C, Temp_bg = Temp_bg) :  args = (; ϕ = ϕ_m, T = thermal.Tc, P = stokes.P, dt = Inf, perturbation_C = perturbation_C, ΔTc=thermal.ΔTc,  Temp_bg = Temp_bg)
         if it > 3
-            # CUDA.@allowscalar pp = [p[3] > 0 || p[4] > 0 for p in phase_ratios.center]
-            pp = [p[3] > 0 || p[4] > 0 for p in phase_ratios.center]
+            CUDA.@allowscalar pp = [p[3] > 0 || p[4] > 0 for p in phase_ratios.center]
+            # pp = [p[3] > 0 || p[4] > 0 for p in phase_ratios.center]
             compute_cells_for_Q!(cells, 0.01, phase_ratios, 3, 4, ϕ_m)
             V_total_cells = compute_total_eruptible_volume(cells, di...)
             V_total = min(V_total_cells, V_total)
@@ -926,8 +926,8 @@ function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir
         if igg.me == 0
             push!(Volume, V_total)
             push!(volume_times, (t / (3600 * 24 * 365.25) / 1.0e3))
-            # CUDA.@allowscalar pp = [p[3] > 0 || p[4] > 0 for p in phase_ratios.center]
-            pp = [p[3] > 0 || p[4] > 0 for p in phase_ratios.center]
+            CUDA.@allowscalar pp = [p[3] > 0 || p[4] > 0 for p in phase_ratios.center]
+            # pp = [p[3] > 0 || p[4] > 0 for p in phase_ratios.center]
             if it > 1 && !isempty(Array(stokes.P)[pp][Array(ϕ_m)[pp] .≥ 0.3])
                 if eruption == true
                     push!(overpressure, minimum(Array(stokes.P)[pp][Array(ϕ_m)[pp]  .≥ 0.3] .- Array(P_lith)[pp][Array(ϕ_m)[pp]  .≥ 0.3]))
@@ -1194,7 +1194,7 @@ do_vtk = true # set to true to generate VTK files for ParaView
 depth, radius, ar, extension, fric_angle = parse.(Float64, ARGS[1:end])
 
 # figdir is defined as Systematics_depth_radius_ar_extension
-figdir   = "Systematics/Caldera2D_$(today())_granite_d_$(depth)_r_$(radius)_ar_$(ar)_ex_$(extension)_phi_$(fric_angle)"
+figdir   = "Systematics/Additional_Runs/Caldera2D_$(today())_granite_d_$(depth)_r_$(radius)_ar_$(ar)_ex_$(extension)_phi_$(fric_angle)"
 n = 384
 nx, ny = n, n >> 1
 
