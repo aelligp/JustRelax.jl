@@ -34,8 +34,10 @@ function init_rheologies(layers, oxd_wt, fric_angle; CharDim = nothing, linear =
 
     #dislocation laws
     disl_top = linear ? LinearViscous(η = 1.0e23) : SetDislocationCreep(Dislocation.granite_Carter_1987)
+    # disl_top = linear ? LinearViscous(η = 1.0e23) : SetDislocationCreep(Dislocation.diabase_Caristan_1982)
 
     disl_bot = linear ? LinearViscous(η = 1.0e21) : SetDislocationCreep(Dislocation.granite_Carter_1987)
+    # disl_bot = linear ? LinearViscous(η = 1.0e21) : SetDislocationCreep(Dislocation.diabase_Caristan_1982)
 
 
     # Define the Volcano cone rheology

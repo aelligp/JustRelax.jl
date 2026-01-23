@@ -12,6 +12,7 @@ function setup2D(
         chamber_depth = 5.0e0,
         chamber_radius = 1.75e0,
         aspect_x = 2.5,
+        thermal_age = 20
     )
 
     Lx = Ly = dimensions[1]
@@ -33,7 +34,7 @@ function setup2D(
         ylim = (minimum(Grid.y.val), maximum(Grid.y.val)),
         zlim = (minimum(Grid.z.val), 0.0),
         phase = LithosphericPhases(Layers = [chamber_depth], Phases = [1, 2]),
-        T = HalfspaceCoolingTemp(Age = 20)
+        T = HalfspaceCoolingTemp(Age = thermal_age)
     )
 
     add_stripes!(Phases, Grid;
@@ -57,7 +58,7 @@ function setup2D(
                 base = 0.0,
                 background = nothing,
                 # T               = HalfspaceCoolingTemp(Age=20)
-                T = i == 1 ? HalfspaceCoolingTemp(Age = 20) : nothing,
+                T = i == 1 ? HalfspaceCoolingTemp(Age = thermal_age) : nothing,
             )
         end
     end

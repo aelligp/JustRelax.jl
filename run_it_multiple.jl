@@ -11,13 +11,14 @@ function main()
         ars = 1.0:0.5:2.5e0
         extensions = -1e-15, 0.0, 1e-15 #, 5e-15, 1e-14, 5e-14, 1e-13
         friction = 15:5:30.0
+        age = 20
         max_jobs = 4
         job_counter = 0
         batch_counter = 0
 
-        for depth in depths, radius in radii, ar in ars, extension in extensions, fric_angle in friction
+        for depth in depths, radius in radii, ar in ars, extension in extensions, fric_angle in friction, ages in age
             diameter = 2 * (radius * ar)
-            if diameter <= 8.0
+            if diameter <= 12.0
                 if job_counter == 0
                     # Create a new batch file
                     batch_counter += 1
@@ -49,11 +50,11 @@ export LD_PRELOAD=export LD_PRELOAD=/capstor/scratch/cscs/paellig/.julia/gh200/j
                 open("runme_batch_$(batch_counter).sh", "a") do io
                     if job_counter == max_jobs-1  # Last job in the batch
                         println(io, """
-srun --cpu-bind=sockets --mem-bind=local --exclusive julia --project -t auto miniapps/benchmarks/stokes2D/Volcano2D/Caldera2D.jl $(depth) $(radius) $(ar) $(extension) $(fric_angle) > $(today())_$(depth)$(radius)$(ar)$(extension)_$job_counter.out 2> $(today())_$(depth)$(radius)$(ar)$(extension)_$job_counter.err &
+srun --cpu-bind=sockets --mem-bind=local --exclusive julia --project -t auto miniapps/benchmarks/stokes2D/Volcano2D/Caldera2D.jl $(depth) $(radius) $(ar) $(extension) $(fric_angle) $(ages) > $(today())_d_$(depth)_$(radius)_$(ar)_$(extension)_$job_counter.out 2> $(today())_d_$(depth)_$(radius)_$(ar)_$(extension)_$job_counter.err &
 wait""")
                     else
                         println(io, """
-srun --cpu-bind=sockets --mem-bind=local --exclusive julia --project -t auto miniapps/benchmarks/stokes2D/Volcano2D/Caldera2D.jl $(depth) $(radius) $(ar) $(extension) $(fric_angle) > $(today())_$(depth)$(radius)$(ar)$(extension)_$job_counter.out 2> $(today())_$(depth)$(radius)$(ar)$(extension)_$job_counter.err &""")
+srun --cpu-bind=sockets --mem-bind=local --exclusive julia --project -t auto miniapps/benchmarks/stokes2D/Volcano2D/Caldera2D.jl $(depth) $(radius) $(ar) $(extension) $(fric_angle) $(ages) > $(today())_d_$(depth)_$(radius)_$(ar)_$(extension)_$job_counter.out 2> $(today())_d_$(depth)_$(radius)_$(ar)_$(extension)_$job_counter.err &""")
                     end
                 end
 

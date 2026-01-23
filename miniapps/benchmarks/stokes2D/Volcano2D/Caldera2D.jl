@@ -1191,10 +1191,10 @@ const progressiv_extension = false
 const displacement = false  #set solver to displacement or velocity
 do_vtk = true # set to true to generate VTK files for ParaView
 
-depth, radius, ar, extension, fric_angle = parse.(Float64, ARGS[1:end])
+depth, radius, ar, extension, fric_angle, thermal_age = parse.(Float64, ARGS[1:end])
 
 # figdir is defined as Systematics_depth_radius_ar_extension
-figdir   = "Systematics/Additional_Runs/Caldera2D_$(today())_granite_d_$(depth)_r_$(radius)_ar_$(ar)_ex_$(extension)_phi_$(fric_angle)"
+figdir   = "Systematics/Reference_Case_Additional_Runs/Caldera2D_$(today())_granite_d_$(depth)_r_$(radius)_ar_$(ar)_ex_$(extension)_phi_$(fric_angle)"
 n = 384
 nx, ny = n, n >> 1
 
@@ -1216,6 +1216,7 @@ open(joinpath(checkpoint, "setup_args.txt"), "w") do io
     println(io, "radius: $radius")
     println(io, "aspect ratio (ar): $ar")
     println(io, "extension: $extension")
+    println(io, "HalfspaceCoolingTemp_age: $thermal_age")
     println(io, "friction angle: $fric_angle")
     println(io, "Roof Ratio: $RoofRatio")
 end
