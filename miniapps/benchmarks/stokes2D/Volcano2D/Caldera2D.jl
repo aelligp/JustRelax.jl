@@ -39,7 +39,7 @@ using GeoParams, CellArrays, Statistics, Dates, JLD2
 include("Caldera_setup.jl")
 include("Caldera_rheology.jl")
 
-## SET OF HELPER FUNCTIONS PARTICULAR FOR THIS SCRIPT --------------------------------
+# SET OF HELPER FUNCTIONS PARTICULAR FOR THIS SCRIPT --------------------------------
 
 import ParallelStencil.INDICES
 const idx_k = INDICES[2]
@@ -244,14 +244,11 @@ function compute_total_eruptible_volume(cells, dx::Float64, dy::Float64)
     V_total = 0.0
     nx, ny = size(cells)
     @inbounds for j in 1:ny
-        # Compute semi-axes for the ellipse at this y-row
-        a = sum(@views cells[:, j] .> 0) * dx / 2   # semi-major axis (x-direction)
-        b = dy                                      # semi-minor axis (y-direction, per row)
-        V_total += (4/3) * π * a * b * a
+        R_j = sum(@views cells[:, j] .> 0) * dx / 2
+        V_total += π * R_j^2 * dy  # disk integration
     end
     return V_total
 end
-
 
 function compute_cells_for_Q!(cells, threshold, phase_ratios, magma_phase, anomaly_phase, melt_fraction)
     @parallel_indices (I...) function _compute_cells_for_Q!(cells, threshold, center_ratio, magma_phase, anomaly_phase, melt_fraction)
@@ -482,10 +479,10 @@ function compute_VEI!(V_erupt)
     end
 end
 
-## END OF HELPER FUNCTION ------------------------------------------------------------
+# END OF HELPER FUNCTION ------------------------------------------------------------
 
-## BEGIN OF MAIN SCRIPT --------------------------------------------------------------
-function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir = "figs2D", do_vtk = false, fric_angle = 30, extension = 1.0e-15 * 0, cutoff_visc = (1.0e16, 1.0e23), V_total = 0.0, V_eruptible = 0.0, layers = 1, air_phase = 6, progressiv_extension = false, plotting = true, displacement=false)
+# BEGIN OF MAIN SCRIPT --------------------------------------------------------------
+function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir = "figs2D", do_vtk = false, fric_angle = 30, extension = 1.0e-15 * 0, cutoff_visc = (1.0e16, 1.0e23), V_total = 0.0, V_eruptible = 0.0, layers = 1, air_phase = 6, progressiv_extension = false, plotting = true, displacement=false, test_eruptibiliy=false)
 
     # Physical domain ------------------------------------
     ni = nx, ny           # number of cells
@@ -665,7 +662,7 @@ function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir
     t, it, er_it = 0.0, 0, 0
     interval = 1
     eruption_counter = 0
-    iterMax = 50.0e3
+    iterMax = 150.0e3
     thermal.Told .= thermal.T
 
     eruption = false
@@ -683,13 +680,18 @@ function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir
     increased_recharge = 0
     volume_times = Float64[]
     overpressure = Float64[]
+    overpressure_05 = Float64[]
     overpressure_t = Float64[]
+    source_term = Float64[0.0, 0.0, 0.0]
+    Q_strain_rate = Float64[0.0, 0.0, 0.0]
+    Q = Float64[]
     local iters, er_it, eruption_counter
 
     depth = PTArray(backend)([y for _ in xci[1], y in xci[2]]);
     compute_cells_for_Q!(cells, 0.01, phase_ratios, 3, 4, ϕ_m);
     V_total = compute_total_eruptible_volume(cells, di...);
 
+    mf_threshold = test_eruptibiliy ? 0.3 : 0.5
 
     while it < 2e3
         if it < 3
@@ -734,14 +736,15 @@ function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir
         if it > 3
             CUDA.@allowscalar pp = [p[3] > 0 || p[4] > 0 for p in phase_ratios.center]
             # pp = [p[3] > 0 || p[4] > 0 for p in phase_ratios.center]
-            compute_cells_for_Q!(cells, 0.01, phase_ratios, 3, 4, ϕ_m)
+            # compute_cells_for_Q!(cells, 0.01, phase_ratios, 3, 4, ϕ_m)
+            compute_cells_for_Q!(cells, 0.1, phase_ratios, 3, 4, ϕ_m)
             V_total_cells = compute_total_eruptible_volume(cells, di...)
             V_total = min(V_total_cells, V_total)
             V_max_eruptable = V_total / 2
             V_erupt_fast = -V_total / 2
 
             if eruption == false && !isempty(Array(stokes.P)[pp][Array(ϕ_m)[pp] .≥ 0.3]) &&
-                (maximum(Array(stokes.P)[pp][Array(ϕ_m)[pp] .≥ 0.3] .- Array(P_lith)[pp][Array(ϕ_m)[pp] .≥ 0.3]) ≥ ΔPc && any(Array(ϕ_m)[pp] .≥ 0.5)) && (V_total - abs(V_erupt_fast)) ≥ V_max_eruptable
+                (maximum(Array(stokes.P)[pp][Array(ϕ_m)[pp] .≥ mf_threshold] .- Array(P_lith)[pp][Array(ϕ_m)[pp] .≥ mf_threshold]) ≥ ΔPc && any(Array(ϕ_m)[pp] .≥ 0.5)) && (V_total - abs(V_erupt_fast)) ≥ V_max_eruptable
                 println("Critical overpressure reached")
                 @views stokes.Q .= 0.0
                 @views thermal.H .= 0.0
@@ -756,8 +759,10 @@ function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir
                     apply_pure_shear(@velocity(stokes)..., εbg, xvi, li...)
                     flow_bcs!(stokes, flow_bcs) # apply boundary conditions
                     update_halo!(@velocity(stokes)...)
+                    push!(source_term, V_erupt)
                 else
                     V_erupt = max(-5e0 * 1e9, -V_total / 2)
+                    push!(source_term, V_erupt)
                 end
                 compute_cells_for_Q!(cells, 0.5, phase_ratios, 3, 4, ϕ_m)
                 V_tot = V_total
@@ -771,28 +776,35 @@ function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir
 
                 # Compute VEI and update arrays
                 VEI = compute_VEI!(abs(V_erupt))
+                push!(Q_strain_rate, V_erupt)
                 push!(VEI_array, VEI)
                 push!(erupted_volume, abs(V_erupt))
                 push!(vol_tot, V_tot)
                 push!(eruption_times, (t / (3600 * 24 * 365.25) / 1.0e3))
                 push!(eruption_counters, eruption_counter)
             elseif eruption == false && !isempty(Array(stokes.P)[pp][Array(ϕ_m)[pp] .≥ 0.3]) &&
-                (maximum(Array(stokes.P)[pp][Array(ϕ_m)[pp]  .≥ 0.3] .- Array(P_lith)[pp][Array(ϕ_m)[pp]  .≥ 0.3]) < ΔPc) && any(Array(ϕ_m)[pp]  .≥ 0.3)
+                (maximum(Array(stokes.P)[pp][Array(ϕ_m)[pp] .≥ mf_threshold] .- Array(P_lith)[pp][Array(ϕ_m)[pp] .≥ mf_threshold]) < ΔPc) && any(Array(ϕ_m)[pp]  .≥ 0.3)
                 @views stokes.Q .= 0.0
                 @views thermal.H .= 0.0
                 compute_cells_for_Q!(cells, 0.3, phase_ratios, 3, 4, ϕ_m)
-                weights = compute_vertical_weights_bottom(cells, PTArray(backend)(depth); smoothing = "cosine")  # or "linear", "exp"
+                # weights = compute_vertical_weights_bottom(cells, PTArray(backend)(depth); smoothing = "cosine")  # or "linear", "exp"
+                weights = compute_vertical_weights(cells, PTArray(backend)(depth); smoothing = "cosine")  # or "linear", "exp"
                 V_tot = V_total
                 T_addition = 950+273e0
                 if rem(it, 10) == 0 || increased_recharge > 0
                     V_erupt = (3e-2 * 1.0e9) / (3600 * 24 * 365.25) * dt # [m3/s * dt] Constrained by https://doi.org/10.1029/2018GC008103
+                    V_erupt = min(V_erupt, V_total/2)
                     printstyled("Episodic increase in recharge\n"; color = :red)
                     increased_recharge ≥ 5 ? increased_recharge = 0 : increased_recharge += 1
+                    push!(source_term, V_erupt)
                 else
                     V_erupt = (3e-3 * 1.0e9) / (3600 * 24 * 365.25) * dt # [m3/s * dt] Constrained by  https://doi.org/10.1029/2018GC008103
+                    V_erupt = min(V_erupt, V_total/2)
                     printstyled("Normal recharge\n"; color = :green)
+                    push!(source_term, V_erupt)
                 end
                 V_total, V_erupt = make_it_go_boom_smooth!(stokes.Q, cells, ϕ_m, V_erupt, V_tot, weights, phase_ratios, 3, 4)
+                push!(Q_strain_rate, V_erupt)
                 # compute_thermal_source_weights!(thermal.H, T_addition, 0.3, V_erupt, V_tot, ϕ_m, phase_ratios, dt, args, di,  3, 4, rheology, weights, cells; α = 1.0)
                 compute_thermal_source!(thermal.H, T_addition, 0.3, V_erupt, V_tot, ϕ_m, phase_ratios, dt, args, di,  3, 4, rheology, cells)
                 println("Added Volume: $(round(ustrip.(uconvert(u"km^3", (V_erupt)u"m^3")); digits = 5)) km³")
@@ -819,7 +831,7 @@ function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir
                 igg;
                 kwargs = (;
                     air_phase = air_phase,
-                    iterMax = it < 5 || eruption == true ? 50.0e3 : iterMax,
+                    iterMax = it < 5 || eruption == true ? 100.0e3 : iterMax,
                     strain_increment = displacement,
                     free_surface = false,
                     nout = 2.0e3,
@@ -931,19 +943,39 @@ function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir
             if it > 1 && !isempty(Array(stokes.P)[pp][Array(ϕ_m)[pp] .≥ 0.3])
                 if eruption == true
                     push!(overpressure, minimum(Array(stokes.P)[pp][Array(ϕ_m)[pp]  .≥ 0.3] .- Array(P_lith)[pp][Array(ϕ_m)[pp]  .≥ 0.3]))
+                    push!(Q, minimum(Array(stokes.Q)))
                 else
                     push!(overpressure, maximum(Array(stokes.P)[pp][Array(ϕ_m)[pp]  .≥ 0.3] .- Array(P_lith)[pp][Array(ϕ_m)[pp]  .≥ 0.3]))
+                    push!(Q, maximum(Array(stokes.Q)))
                 end
+
+                if any(Array(ϕ_m)[pp] .≥ 0.5)
+                    if eruption == true
+                        push!(overpressure_05, minimum(Array(stokes.P)[pp][Array(ϕ_m)[pp] .≥ 0.5] .- Array(P_lith)[pp][Array(ϕ_m)[pp] .≥ 0.5]))
+                    else
+                        push!(overpressure_05, maximum(Array(stokes.P)[pp][Array(ϕ_m)[pp] .≥ 0.5] .- Array(P_lith)[pp][Array(ϕ_m)[pp] .≥ 0.5]))
+                    end
+                else
+                    # No melt-dominated domain exists
+                    push!(overpressure_05, NaN)
+                end
+
             push!(overpressure_t, t / (3600 * 24 * 365.25) / 1.0e3)
             end
             # Only allow eruption to be set to false if VEI < 6
             if it > 1 && !isempty(VEI_array) && VEI_array[end] < 6 && eruption == true
-                if !isempty(overpressure) && overpressure[end] < 0.0
+                # Primary: stop based on ϕ ≥ 0.5 underpressure
+                if !isempty(overpressure_05) && !isnan(overpressure_05[end]) && overpressure_05[end] < 0.0
                     eruption = false
-                    println("Eruption stopped")
-                elseif er_it > 10 && !isempty(overpressure) && overpressure[end] < 20e6
+                    println("Eruption stopped (underpressure at ϕ≥0.5)")
+                # Fallback: if no melt core remains, check ϕ ≥ 0.3
+                elseif (isempty(overpressure_05) || isnan(overpressure_05[end])) && !isempty(overpressure) && overpressure[end] < 0.0
                     eruption = false
-                    println("Eruption stopped after $er_it iterations")
+                    println("Eruption stopped (melt core depleted, underpressure at ϕ≥0.3)")
+                # Timeout: slow depressurization
+                elseif er_it > 10 && !isempty(overpressure_05) && !isnan(overpressure_05[end]) && overpressure_05[end] < 20e6
+                    eruption = false
+                    println("Eruption stopped after $er_it iterations (slow depressurization at ϕ≥0.5)")
                 end
             end
         end
@@ -954,11 +986,26 @@ function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir
 
         if plotting
             # Data I/O and plotting ---------------------
-            if it == 1 || rem(it, 5) == 0
-                if igg.me == 0 && it == 1
-                    metadata(pwd(), checkpoint, joinpath(@__DIR__, "Caldera2D.jl"), joinpath(@__DIR__, "Caldera_setup.jl"), joinpath(@__DIR__, "Caldera_rheology.jl"))
-                end
-                checkpointing_jld2(checkpoint, stokes, thermal, t, dt, igg; it = it, VEI_array = VEI_array, eruption_times = eruption_times, eruption_counters = eruption_counters, Volume = Volume, erupted_volume = erupted_volume, volume_times = volume_times, overpressure = overpressure, overpressure_t = overpressure_t)
+            if it == 1 || rem(it, 1) == 0
+                # if igg.me == 0 && it == 1
+                #     metadata(pwd(), checkpoint, joinpath(@__DIR__, "Caldera2D.jl"), joinpath(@__DIR__, "Caldera_setup.jl"), joinpath(@__DIR__, "Caldera_rheology.jl"))
+                # end
+
+                checkpointing_jld2(checkpoint, stokes, thermal, t, dt, igg;
+                    source_term = source_term,
+                    Q_strain_rate = Q_strain_rate,
+                    it = it,
+                    VEI_array = VEI_array,
+                    eruption_times = eruption_times,
+                    eruption_counters = eruption_counters,
+                    Volume = Volume,
+                    erupted_volume = erupted_volume,
+                    volume_times = volume_times,
+                    overpressure = overpressure,           # ϕ ≥ 0.3
+                    overpressure_05 = overpressure_05,     # ← NEW: ϕ ≥ 0.5
+                    overpressure_t = overpressure_t,
+                    Q = Q
+                )
                 checkpointing_particles(checkpoint, particles; phases = pPhases, phase_ratios = phase_ratios, chain = chain, particle_args = particle_args, t = t, dt = dt, it = it)
                 # mktempdir() do tmpdir
                 #     tmpname = joinpath(tmpdir, "OEV_arrays.jld2")
@@ -1172,7 +1219,11 @@ function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir
                         xlabelsize = 25,
                         ylabelsize = 25
                     )
-                    scatterlines!(ax1, overpressure_t, overpressure./1e6, color = :violet, markersize = 5)
+                    scatterlines!(ax1, overpressure_t, overpressure./1e6, color = :violet, markersize = 5, label = "ϕ ≥ 0.3")
+                    scatterlines!(ax1, overpressure_t, overpressure_05./1e6, color = :orange, markersize = 5, label = "ϕ ≥ 0.5")
+                    hlines!(ax1, [20.0], color = :black, linestyle = :dash, linewidth = 2, label = "ΔPc = 20 MPa")
+                    hlines!(ax1, [0.0], color = :gray, linestyle = :dot, linewidth = 1.5, label = "Lithostatic")
+                    fig1[1,2] = Legend(fig1, ax1, title = "Melt fraction threshold")
                     fig1
                     save(joinpath(figdir, "Overpressure.png"), fig1)
                     save(joinpath(figdir, "Overpressure.svg"), fig1)
@@ -1210,7 +1261,7 @@ if plotting
     take(checkpoint)
 end
 # ----------------------------------------------------
-RoofRatio =  ((depth - radius)) / (radius * ar)
+RoofRatio =  ((depth - radius)+2.8 ) / (2* radius * ar)
 open(joinpath(checkpoint, "setup_args.txt"), "w") do io
     println(io, "depth: $depth")
     println(io, "radius: $radius")
@@ -1243,4 +1294,9 @@ end
 # extension = 0.0
 # cutoff_visc = (1.0e17, 1.0e23)
 # fric_angle = 30.0e0 # friction angle in degrees
+
+if igg.me == 0
+    metadata(pwd(), checkpoint, joinpath(@__DIR__, "Caldera2D.jl"), joinpath(@__DIR__, "Caldera_setup.jl"), joinpath(@__DIR__, "Caldera_rheology.jl"))
+end
+
 main(li, origin, phases_GMG, T_GMG, T_bg, igg; figdir = figdir, nx = nx, ny = ny, do_vtk = do_vtk, fric_angle = fric_angle, extension = extension, cutoff_visc = (1.0e17, 1.0e23), V_total = V_total, V_eruptible = V_eruptible, layers = layers, air_phase = air_phase, progressiv_extension = progressiv_extension, plotting = plotting, displacement=displacement);

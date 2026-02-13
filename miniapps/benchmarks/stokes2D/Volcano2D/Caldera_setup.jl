@@ -101,7 +101,7 @@ function setup2D(
     T_bg = Temp_bg[:, 1, :] .+ 273
     V_total = (4 / 3 * π * (chamber_radius * aspect_x) * chamber_radius * (chamber_radius * aspect_x)) * 1.0e9
     V_eruptible = (4 / 3 * π * (chamber_radius / 1.25) * aspect_x * (chamber_radius / 2) * ((chamber_radius / 1.25) * aspect_x)) * 1.0e9
-    R = ((chamber_depth - chamber_radius)) / (chamber_radius * aspect_x)
+    R = ((chamber_depth - chamber_radius) + volcano_size[1] -0.2) / (2* chamber_radius * aspect_x)
     chamber_diameter = 2 * (chamber_radius * aspect_x)
     chamber_erupt = 2 * ((chamber_radius / 1.25) * aspect_x)
     printstyled("Magma volume of the initial chamber:$(round(ustrip.(uconvert(u"km^3", (V_total)u"m^3")); digits = 5)) km³ \n"; bold = true, color = :red, blink = true)
