@@ -3,7 +3,7 @@ using Random
 
 function init_rheologies(layers, oxd_wt, fric_angle; CharDim = nothing, linear = false, incompressible = true, plastic = true, magma = false, softening_C=true, softening_ϕ=false)
 
-    η_reg = 1.0e15
+    η_reg = 1.0e18
     C = plastic ? 10.0e6 : Inf
     ϕ = fric_angle
     Ψ = 0.0
