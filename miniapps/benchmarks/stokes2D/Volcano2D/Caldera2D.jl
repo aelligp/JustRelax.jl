@@ -539,7 +539,6 @@ function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir
     # rock ratios for variational stokes
     # RockRatios
     ϕ = RockRatio(backend, ni)
-    # update_rock_ratio!(ϕ, phase_ratios, air_phase)
     compute_rock_fraction!(ϕ, chain, xvi, di)
 
     # particle fields for the stress rotation
@@ -552,13 +551,11 @@ function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir
     # STOKES ---------------------------------------------
     # Allocate arrays needed for every Stokes problem
     stokes = StokesArrays(backend, ni)
-    # pt_stokes = PTStokesCoeffs(li, di; ϵ_rel = 1.0e-5, ϵ_abs = 1.0e-4, Re = 3.1, r = 0.7, CFL = 0.8 / √2.1) # Re=3π, r=0.7
     pt_stokes = PTStokesCoeffs(li, di; ϵ_rel = 1.0e-5, ϵ_abs = 1.0e-4, Re = π / 2, r = 0.7, CFL = 0.8 / √2.1) # Re=3π, r=0.7
     σ = PrincipalStress(backend, ni)
 
     # randomize cohesion
     perturbation_C = @rand(ni...)
-    # stokes.EII_pl .+= (1e-2.*perturbation_C)
     # ----------------------------------------------------
 
     # TEMPERATURE PROFILE --------------------------------
@@ -584,10 +581,8 @@ function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir
     ρg = ntuple(_ -> @zeros(ni...), Val(2))
     for _ in 1:5
         compute_ρg!(ρg, phase_ratios, rheology, (T = thermal.Tc, P = stokes.P))
-        # @parallel init_P!(stokes.P, ρg[end], xvi[2])
         @parallel init_P!(stokes.P, ρg[end], xvi[2], PTArray(backend)(topo_y))
     end
-    # stokes.P        .= PTArray(backend)(reverse(cumsum(reverse((ρg[2]).* di[2], dims=2), dims=2), dims=2))
 
     # Melt fraction
     ϕ_m = @zeros(ni...)
@@ -645,13 +640,6 @@ function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir
     end
     grid2particle!(pT, xvi, T_buffer, particles)
 
-    # ## Plot initial T and P profile
-    # let
-    #     compo = [oxd_wt[1] (oxd_wt[7]+oxd_wt[8])]
-    #     fig=Plot_TAS_diagram(compo; sz=(1000, 1000))
-    #     save(joinpath(figdir, "TAS_diagram.png"), fig)
-    # end
-
     τxx_v = @zeros(ni .+ 1...)
     τyy_v = @zeros(ni .+ 1...)
     cells = similar(stokes.Q)
@@ -698,14 +686,6 @@ function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir
         if it < 3
             P_lith .= stokes.P
         end
-
-        # if it >1 && iters.iter > iterMax && iters.err_evo1[end] > pt_stokes.ϵ_abs * 5
-        #     iterMax += 10e3
-        #     iterMax = min(iterMax, 200e3)
-        #     println("Increasing maximum pseudo timesteps to $iterMax")
-        # else
-        #     iterMax = 150e3
-        # end
 
         if progressiv_extension
             if it > 4 && round(t/(3600 * 24 *365.25); digits=2) >= 6e3*interval
@@ -999,9 +979,6 @@ function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir
         if plotting
             # Data I/O and plotting ---------------------
             if it == 1 || rem(it, 5) == 0
-                # if igg.me == 0 && it == 1
-                #     metadata(pwd(), checkpoint, joinpath(@__DIR__, "Caldera2D.jl"), joinpath(@__DIR__, "Caldera_setup.jl"), joinpath(@__DIR__, "Caldera_rheology.jl"))
-                # end
 
                 checkpointing_jld2(checkpoint, stokes, thermal, t, dt, igg;
                     source_term = source_term,
@@ -1013,18 +990,13 @@ function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir
                     Volume = Volume,
                     erupted_volume = erupted_volume,
                     volume_times = volume_times,
-                    overpressure = overpressure,           # ϕ ≥ 0.3
-                    overpressure_05 = overpressure_05,     # ← NEW: ϕ ≥ 0.5
-                    overpressure_04 = overpressure_04,     # ← NEW: ϕ ≥ 0.4
+                    overpressure = overpressure,
+                    overpressure_05 = overpressure_05,
+                    overpressure_04 = overpressure_04,
                     overpressure_t = overpressure_t,
                     Q = Q
                 )
                 checkpointing_particles(checkpoint, particles; phases = pPhases, phase_ratios = phase_ratios, chain = chain, particle_args = particle_args, t = t, dt = dt, it = it)
-                # mktempdir() do tmpdir
-                #     tmpname = joinpath(tmpdir, "OEV_arrays.jld2")
-                #     jldsave(tmpname; VEI_array = VEI_array, eruption_times = eruption_times, eruption_counters = eruption_counters, Volume = Volume, erupted_volume = erupted_volume, volume_times = volume_times, overpressure = overpressure, overpressure_t = overpressure_t)
-                #     return mv(tmpname, joinpath(checkpoint, "OEV_arrays.jld2"); force = true)
-                # end
                 η_eff = @. stokes.τ.II / (2 * stokes.ε.II)
                 (; η_vep, η) = stokes.viscosity
                 if do_vtk
@@ -1109,9 +1081,9 @@ function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir
                 h3 = heatmap!(ax3, xci[1] .* 1.0e-3, xci[2] .* 1.0e-3, Array(stokes.τ.II) ./ 1.0e6, colormap = :batlow)
                 # Plot effective viscosity
                 h4 = heatmap!(ax4, xci[1] .* 1.0e-3, xci[2] .* 1.0e-3, Array(log10.(stokes.viscosity.η_vep)), colorrange = log10.(viscosity_cutoff), colormap = :batlow)
+                # Plot accumulated plastic strain
                 h5 = heatmap!(ax5, xci[1] .* 1.0e-3, xci[2] .* 1.0e-3, Array(stokes.EII_pl), colormap = :batlow)
-                # contour!(ax5, xci[1] .* 1.0e-3, xci[2] .* 1.0e-3, Array(ϕ_m), levels = [0.5, 0.75, 1.0], color = :white, linewidth = 1.5, labels=true)
-                # h6  = heatmap!(ax6, xci[1].*1e-3, xci[2].*1e-3, Array(ϕ_m) , colormap=:lipari, colorrange=(0.0,1.0))
+                # Plot dynamic pressure relative to lithostatic pressure
                 h6 = heatmap!(ax6, xci[1] .* 1.0e-3, xci[2] .* 1.0e-3, (Array(stokes.P) .- Array(P_lith)) ./ 1.0e6, colormap = :roma)
                 P_level = 5.353955978584176e7        # Pa
                 contour!(ax6,

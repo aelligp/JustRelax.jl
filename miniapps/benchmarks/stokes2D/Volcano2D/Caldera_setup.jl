@@ -23,7 +23,6 @@ function setup2D(
 
     # Allocate Phase and Temp arrays
     air_phase = layers + 6
-    # Phases = fill(6, nx, 2, nz);
     Phases = fill(air_phase, nx, 2, nz)
     Temp = fill(0.0, nx, 2, nz)
     Temp_bg = fill(0.0, nx, 2, nz)
@@ -80,17 +79,6 @@ function setup2D(
         phase = ConstantPhase(4),
         T = ConstantTemp(T = chamber_T)
     )
-
-    # if chimney
-    #     add_cylinder!(
-    #         Phases, Temp, Grid;
-    #         base = (mean(Grid.x.val), 0, -(chamber_depth - chamber_radius)),
-    #         cap = (mean(Grid.x.val), 0, flat ? 0.0e0 : volcano_size[1]),
-    #         radius = conduit_radius,
-    #         phase = ConstantPhase(layers + 6),
-    #         # T      = ConstantTemp(T=chamber_T),
-    #     )
-    # end
 
     Grid = addfield(Grid, (; Phases, Temp))
     li = (abs(last(x) - first(x)), abs(last(z) - first(z))) .* 1.0e3
