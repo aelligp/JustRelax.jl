@@ -40,7 +40,7 @@ export MPICH_GPU_SUPPORT_ENABLED=1
 export IGG_CUDAAWARE_MPI=1 # IGG
 export JULIA_CUDA_USE_COMPAT=false # IGG
 
-export LD_PRELOAD=export LD_PRELOAD=/capstor/scratch/cscs/paellig/.julia/gh200/juliaup/depot/artifacts/e313763c2521efed920ca04560b24511b37d35ea/lib/libcrypto.so.3
+export LD_PRELOAD=/capstor/scratch/cscs/paellig/.julia/gh200/juliaup/depot/artifacts/e313763c2521efed920ca04560b24511b37d35ea/lib/libcrypto.so.3
 
 """)
                     end

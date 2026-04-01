@@ -482,7 +482,7 @@ end
 # END OF HELPER FUNCTION ------------------------------------------------------------
 
 # BEGIN OF MAIN SCRIPT --------------------------------------------------------------
-function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir = "figs2D", do_vtk = false, fric_angle = 30, extension = 1.0e-15 * 0, cutoff_visc = (1.0e16, 1.0e23), V_total = 0.0, V_eruptible = 0.0, layers = 1, air_phase = 6, progressiv_extension = false, plotting = true, displacement=false, test_eruptibiliy=false)
+function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir = "figs2D", do_vtk = false, fric_angle = 30, extension = 1.0e-15 * 0, cutoff_visc = (1.0e16, 1.0e23), V_total = 0.0, V_eruptible = 0.0, layers = 1, air_phase = 6, progressiv_extension = false, plotting = true, displacement=false, test_eruptibility=false, disl_law = Dislocation.diabase_Caristan_1982)
 
     # Physical domain ------------------------------------
     ni = nx, ny           # number of cells
@@ -493,9 +493,8 @@ function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir
 
     # Physical properties using GeoParams ----------------
     oxd_wt = (61.6, 0.9, 17.7, 3.65, 2.35, 5.38, 4.98, 1.27, 3.0) # LSr hypothetical parent liquid for climactic magma chambers (https://doi.org/10.1007/BF00402114 Table 7)
-    rheology = init_rheologies(layers, oxd_wt, fric_angle; incompressible = false, magma = true)
-    rheology_incomp = init_rheologies(layers, oxd_wt, fric_angle; incompressible = true, magma = true, plastic = false)
-    # dt_time = 100 * 3600 * 24 * 365
+    rheology = init_rheologies(layers, oxd_wt, fric_angle; incompressible = false, magma = true, disl_law = disl_law)
+    rheology_incomp = init_rheologies(layers, oxd_wt, fric_angle; incompressible = true, magma = true, plastic = false, disl_law = disl_law)
     dt_time = 1.0e3 * 3600 * 24 * 365
     κ = (4 / (rheology[1].HeatCapacity[1].Cp.val * rheology[1].Density[1].ρ0.val)) # thermal diffusivity                                 # thermal diffusivity
     dt_diff = 0.5 * min(di...)^2 / κ / 2.01
@@ -668,6 +667,7 @@ function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir
     eruption = false
     V_erupt_fast = -V_total / 3
     V_max_eruptable = V_total / 2
+    V_initial = V_total
     ΔPc = 20.0e6 # 20MPa
 
     # Initialize the tracking arrays
@@ -680,6 +680,7 @@ function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir
     increased_recharge = 0
     volume_times = Float64[]
     overpressure = Float64[]
+    overpressure_04 = Float64[]
     overpressure_05 = Float64[]
     overpressure_t = Float64[]
     source_term = Float64[0.0, 0.0, 0.0]
@@ -691,7 +692,7 @@ function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir
     compute_cells_for_Q!(cells, 0.01, phase_ratios, 3, 4, ϕ_m);
     V_total = compute_total_eruptible_volume(cells, di...);
 
-    mf_threshold = test_eruptibiliy ? 0.3 : 0.5
+    mf_threshold = test_eruptibility ? 0.5 : 0.3
 
     while it < 2e3
         if it < 3
@@ -744,7 +745,7 @@ function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir
             V_erupt_fast = -V_total / 2
 
             if eruption == false && !isempty(Array(stokes.P)[pp][Array(ϕ_m)[pp] .≥ 0.3]) &&
-                (maximum(Array(stokes.P)[pp][Array(ϕ_m)[pp] .≥ mf_threshold] .- Array(P_lith)[pp][Array(ϕ_m)[pp] .≥ mf_threshold]) ≥ ΔPc && any(Array(ϕ_m)[pp] .≥ 0.5)) && (V_total - abs(V_erupt_fast)) ≥ V_max_eruptable
+                (maximum(Array(stokes.P)[pp][Array(ϕ_m)[pp] .≥ mf_threshold] .- Array(P_lith)[pp][Array(ϕ_m)[pp] .≥ mf_threshold]) ≥ ΔPc && any(Array(ϕ_m)[pp] .≥ 0.5)) && V_total ≥ V_initial / 2
                 println("Critical overpressure reached")
                 @views stokes.Q .= 0.0
                 @views thermal.H .= 0.0
@@ -960,6 +961,17 @@ function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir
                     push!(overpressure_05, NaN)
                 end
 
+                if any(Array(ϕ_m)[pp] .≥ 0.4)
+                    if eruption == true
+                        push!(overpressure_04, minimum(Array(stokes.P)[pp][Array(ϕ_m)[pp] .≥ 0.4] .- Array(P_lith)[pp][Array(ϕ_m)[pp] .≥ 0.4]))
+                    else
+                        push!(overpressure_04, maximum(Array(stokes.P)[pp][Array(ϕ_m)[pp] .≥ 0.4] .- Array(P_lith)[pp][Array(ϕ_m)[pp] .≥ 0.4]))
+                    end
+                else
+                    # No melt-dominated domain exists
+                    push!(overpressure_05, NaN)
+                end
+
             push!(overpressure_t, t / (3600 * 24 * 365.25) / 1.0e3)
             end
             # Only allow eruption to be set to false if VEI < 6
@@ -1003,6 +1015,7 @@ function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir
                     volume_times = volume_times,
                     overpressure = overpressure,           # ϕ ≥ 0.3
                     overpressure_05 = overpressure_05,     # ← NEW: ϕ ≥ 0.5
+                    overpressure_04 = overpressure_04,     # ← NEW: ϕ ≥ 0.4
                     overpressure_t = overpressure_t,
                     Q = Q
                 )
@@ -1220,6 +1233,7 @@ function main(li, origin, phases_GMG, T_GMG, T_bg, igg; nx = 16, ny = 16, figdir
                         ylabelsize = 25
                     )
                     scatterlines!(ax1, overpressure_t, overpressure./1e6, color = :violet, markersize = 5, label = "ϕ ≥ 0.3")
+                    scatterlines!(ax1, overpressure_t, overpressure_04./1e6, color = :green, markersize = 5, label = "ϕ ≥ 0.4")
                     scatterlines!(ax1, overpressure_t, overpressure_05./1e6, color = :orange, markersize = 5, label = "ϕ ≥ 0.5")
                     hlines!(ax1, [20.0], color = :black, linestyle = :dash, linewidth = 2, label = "ΔPc = 20 MPa")
                     hlines!(ax1, [0.0], color = :gray, linestyle = :dot, linewidth = 1.5, label = "Lithostatic")
@@ -1241,11 +1255,12 @@ const plotting = true
 const progressiv_extension = false
 const displacement = false  #set solver to displacement or velocity
 do_vtk = true # set to true to generate VTK files for ParaView
+test_eruption = false
 
-depth, radius, ar, extension, fric_angle, thermal_age = parse.(Float64, ARGS[1:end])
+depth, radius, ar, extension, fric_angle, thermal_age = parse.(Float64, ARGS[1:6])
 
 # figdir is defined as Systematics_depth_radius_ar_extension
-figdir   = "Systematics/Reference_Case_Additional_Runs/Caldera2D_$(today())_granite_d_$(depth)_r_$(radius)_ar_$(ar)_ex_$(extension)_phi_$(fric_angle)"
+figdir   = "Caldera2D_$(today())_d_$(depth)_r_$(radius)_ar_$(ar)_ex_$(extension)_phi_$(fric_angle)"
 n = 384
 nx, ny = n, n >> 1
 
@@ -1299,4 +1314,4 @@ if igg.me == 0
     metadata(pwd(), checkpoint, joinpath(@__DIR__, "Caldera2D.jl"), joinpath(@__DIR__, "Caldera_setup.jl"), joinpath(@__DIR__, "Caldera_rheology.jl"))
 end
 
-main(li, origin, phases_GMG, T_GMG, T_bg, igg; figdir = figdir, nx = nx, ny = ny, do_vtk = do_vtk, fric_angle = fric_angle, extension = extension, cutoff_visc = (1.0e17, 1.0e23), V_total = V_total, V_eruptible = V_eruptible, layers = layers, air_phase = air_phase, progressiv_extension = progressiv_extension, plotting = plotting, displacement=displacement);
+main(li, origin, phases_GMG, T_GMG, T_bg, igg; figdir = figdir, nx = nx, ny = ny, do_vtk = do_vtk, fric_angle = fric_angle, extension = extension, cutoff_visc = (1.0e17, 1.0e23), V_total = V_total, V_eruptible = V_eruptible, layers = layers, air_phase = air_phase, progressiv_extension = progressiv_extension, plotting = plotting, displacement=displacement, test_eruptibility = test_eruption);
